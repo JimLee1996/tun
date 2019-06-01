@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha1"
 	"io"
 	"log"
 	"math/rand"
@@ -9,19 +8,13 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/crypto/pbkdf2"
-
 	"github.com/JimLee1996/tun/kcp"
 	"github.com/JimLee1996/tun/smux"
 	"github.com/urfave/cli"
 )
 
-var (
-	// VERSION is injected by buildflags
-	VERSION = "SELFBUILD"
-	// SALT is use for pbkdf2 key expansion
-	SALT = "kcp-go"
-)
+// VERSION is injected by buildflags
+var VERSION = "SELFBUILD"
 
 // handle multiplex-ed connection
 func handleMux(conn io.ReadWriteCloser, config *Config) {
@@ -108,16 +101,6 @@ func main() {
 			Usage: "target server address",
 		},
 		cli.StringFlag{
-			Name:  "key",
-			Value: "kcptun",
-			Usage: "pre-shared secret between client and server",
-		},
-		cli.StringFlag{
-			Name:  "crypt",
-			Value: "salsa20",
-			Usage: "salsa20, none",
-		},
-		cli.StringFlag{
 			Name:  "mode",
 			Value: "fast3",
 			Usage: "profiles: fast3, fast2, fast, normal, manual",
@@ -142,7 +125,6 @@ func main() {
 			Value: 0,
 			Usage: "set DSCP(6bit)",
 		},
-
 		cli.BoolFlag{
 			Name:   "acknodelay",
 			Usage:  "flush ack immediately when a packet is received",
@@ -197,8 +179,6 @@ func main() {
 		config := Config{}
 		config.Listen = c.String("listen")
 		config.Target = c.String("target")
-		config.Key = c.String("key")
-		config.Crypt = c.String("crypt")
 		config.Mode = c.String("mode")
 		config.MTU = c.Int("mtu")
 		config.SndWnd = c.Int("sndwnd")
@@ -239,23 +219,10 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
-		log.Println("version:", VERSION)
-		log.Println("initiating key derivation")
-		pass := pbkdf2.Key([]byte(config.Key), []byte(SALT), 4096, 32, sha1.New)
-		var block kcp.BlockCrypt
-		switch config.Crypt {
-		case "none":
-			block, _ = kcp.NewNoneBlockCrypt(pass)
-		default:
-			config.Crypt = "salsa20"
-			block, _ = kcp.NewSalsa20BlockCrypt(pass)
-		}
-
-		lis, err := kcp.ListenWithOptions(config.Listen, block)
+		lis, err := kcp.Listen(config.Listen)
 		checkError(err)
 		log.Println("listening on:", lis.Addr())
 		log.Println("target:", config.Target)
-		log.Println("encryption:", config.Crypt)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
 		log.Println("mtu:", config.MTU)

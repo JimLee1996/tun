@@ -3,7 +3,6 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"hash/crc32"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -23,15 +22,6 @@ func (errTimeout) Temporary() bool { return true }
 func (errTimeout) Error() string   { return "i/o timeout" }
 
 const (
-	// 16-bytes nonce for each packet
-	nonceSize = 16
-
-	// 4-bytes packet checksum
-	crcSize = 4
-
-	// overall crypto header size
-	cryptHeaderSize = nonceSize + crcSize
-
 	// maximum packet size
 	mtuLimit = 1500
 
@@ -62,7 +52,6 @@ type (
 		conn       net.PacketConn // the underlying packet connection
 		kcp        *KCP           // KCP ARQ protocol
 		l          *Listener      // pointing to the Listener object if it's been accepted by a Listener
-		block      BlockCrypt     // block encryption object
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -87,9 +76,6 @@ type (
 		chReadError  chan error    // notify PacketConn.Read() have an error
 		chWriteError chan error    // notify PacketConn.Write() have an error
 
-		// nonce generator
-		nonce Entropy
-
 		isClosed bool // flag the session has Closed
 		mu       sync.Mutex
 	}
@@ -104,11 +90,9 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func newUDPSession(conv uint32, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, l *Listener, conn net.PacketConn, remote net.Addr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
-	sess.nonce = new(nonceMD5)
-	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chReadError = make(chan error, 1)
@@ -116,13 +100,7 @@ func newUDPSession(conv uint32, l *Listener, conn net.PacketConn, remote net.Add
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
-	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
-
-	// calculate additional header size introduced by encryption
-	if sess.block != nil {
-		sess.headerSize += cryptHeaderSize
-	}
 
 	// we only need to allocate extended packet buffer if we have the additional header
 	if sess.headerSize > 0 {
@@ -437,9 +415,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // post-processing for sending a packet from kcp core
 // steps:
 // 1. Header extending
-// 2. CRC32 integrity
-// 3. Encryption
-// 4. WriteTo kernel
+// 2. WriteTo kernel
 func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
@@ -450,22 +426,7 @@ func (s *UDPSession) output(buf []byte) {
 		copy(ext[s.headerSize:], buf)
 	}
 
-	// 2&3. crc32 & encryption
-	if s.block != nil {
-		s.nonce.Fill(ext[:nonceSize])
-		checksum := crc32.ChecksumIEEE(ext[cryptHeaderSize:])
-		binary.LittleEndian.PutUint32(ext[nonceSize:], checksum)
-		s.block.Encrypt(ext, ext)
-
-		for k := range ecc {
-			s.nonce.Fill(ecc[k][:nonceSize])
-			checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
-			binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-			s.block.Encrypt(ecc[k], ecc[k])
-		}
-	}
-
-	// 4. WriteTo kernel
+	// 2. WriteTo kernel
 	nbytes := 0
 	npkts := 0
 	for i := 0; i < s.dup+1; i++ {
@@ -555,22 +516,7 @@ func (s *UDPSession) readLoop() {
 
 			if n >= s.headerSize+IKCP_OVERHEAD {
 				data := buf[:n]
-				dataValid := false
-				if s.block != nil {
-					s.block.Decrypt(data, data)
-					data = data[nonceSize:]
-					checksum := crc32.ChecksumIEEE(data[crcSize:])
-					if checksum == binary.LittleEndian.Uint32(data) {
-						data = data[crcSize:]
-						dataValid = true
-					}
-				} else if s.block == nil {
-					dataValid = true
-				}
-
-				if dataValid {
-					s.kcpInput(data)
-				}
+				s.kcpInput(data)
 			}
 		} else {
 			s.chReadError <- err
@@ -582,8 +528,7 @@ func (s *UDPSession) readLoop() {
 type (
 	// Listener defines a server which will be waiting to accept incoming connections
 	Listener struct {
-		block BlockCrypt     // block encryption
-		conn  net.PacketConn // the underlying packet connection
+		conn net.PacketConn // the underlying packet connection
 
 		sessions        map[string]*UDPSession // all sessions accepted by this Listener
 		sessionLock     sync.Mutex
@@ -606,56 +551,42 @@ func (l *Listener) monitor() {
 		if n, from, err := l.conn.ReadFrom(buf); err == nil {
 			if n >= l.headerSize+IKCP_OVERHEAD {
 				data := buf[:n]
-				dataValid := false
-				if l.block != nil {
-					l.block.Decrypt(data, data)
-					data = data[nonceSize:]
-					checksum := crc32.ChecksumIEEE(data[crcSize:])
-					if checksum == binary.LittleEndian.Uint32(data) {
-						data = data[crcSize:]
-						dataValid = true
+
+				addr := from.String()
+				var s *UDPSession
+				var ok bool
+
+				// the packets received from an address always come in batch,
+				// cache the session for next packet, without querying map.
+				if addr == lastAddr {
+					s, ok = lastSession, true
+				} else {
+					l.sessionLock.Lock()
+					if s, ok = l.sessions[addr]; ok {
+						lastSession = s
+						lastAddr = addr
 					}
-				} else if l.block == nil {
-					dataValid = true
+					l.sessionLock.Unlock()
 				}
 
-				if dataValid {
-					addr := from.String()
-					var s *UDPSession
-					var ok bool
+				if !ok { // new session
+					if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
+						var conv uint32
+						convValid := false
+						conv = binary.LittleEndian.Uint32(data)
+						convValid = true
 
-					// the packets received from an address always come in batch,
-					// cache the session for next packet, without querying map.
-					if addr == lastAddr {
-						s, ok = lastSession, true
-					} else {
-						l.sessionLock.Lock()
-						if s, ok = l.sessions[addr]; ok {
-							lastSession = s
-							lastAddr = addr
+						if convValid { // creates a new session only if the 'conv' field in kcp is accessible
+							s := newUDPSession(conv, l, l.conn, from)
+							s.kcpInput(data)
+							l.sessionLock.Lock()
+							l.sessions[addr] = s
+							l.sessionLock.Unlock()
+							l.chAccepts <- s
 						}
-						l.sessionLock.Unlock()
 					}
-
-					if !ok { // new session
-						if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
-							var conv uint32
-							convValid := false
-							conv = binary.LittleEndian.Uint32(data)
-							convValid = true
-
-							if convValid { // creates a new session only if the 'conv' field in kcp is accessible
-								s := newUDPSession(conv, l, l.conn, from, l.block)
-								s.kcpInput(data)
-								l.sessionLock.Lock()
-								l.sessions[addr] = s
-								l.sessionLock.Unlock()
-								l.chAccepts <- s
-							}
-						}
-					} else {
-						s.kcpInput(data)
-					}
+				} else {
+					s.kcpInput(data)
 				}
 			}
 		} else {
@@ -753,10 +684,7 @@ func (l *Listener) closeSession(remote net.Addr) (ret bool) {
 func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil) }
-
-// ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
-func ListenWithOptions(laddr string, block BlockCrypt) (*Listener, error) {
+func Listen(laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -766,33 +694,24 @@ func ListenWithOptions(laddr string, block BlockCrypt) (*Listener, error) {
 		return nil, errors.Wrap(err, "net.ListenUDP")
 	}
 
-	return ServeConn(block, conn)
+	return ServeConn(conn)
 }
 
 // ServeConn serves KCP protocol for a single packet connection.
-func ServeConn(block BlockCrypt, conn net.PacketConn) (*Listener, error) {
+func ServeConn(conn net.PacketConn) (*Listener, error) {
 	l := new(Listener)
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, acceptBacklog)
 	l.chSessionClosed = make(chan net.Addr)
 	l.die = make(chan struct{})
-	l.block = block
-
-	// calculate header size
-	if l.block != nil {
-		l.headerSize += cryptHeaderSize
-	}
 
 	go l.monitor()
 	return l, nil
 }
 
 // Dial connects to the remote address "raddr" on the network "udp"
-func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil) }
-
-// DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
-func DialWithOptions(raddr string, block BlockCrypt) (*UDPSession, error) {
+func Dial(raddr string) (*UDPSession, error) {
 	// network type detection
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
@@ -808,11 +727,11 @@ func DialWithOptions(raddr string, block BlockCrypt) (*UDPSession, error) {
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	return NewConn(raddr, block, conn)
+	return NewConn(raddr, conn)
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
-func NewConn(raddr string, block BlockCrypt, conn net.PacketConn) (*UDPSession, error) {
+func NewConn(raddr string, conn net.PacketConn) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -820,7 +739,7 @@ func NewConn(raddr string, block BlockCrypt, conn net.PacketConn) (*UDPSession, 
 
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return newUDPSession(convid, nil, conn, udpaddr, block), nil
+	return newUDPSession(convid, nil, conn, udpaddr), nil
 }
 
 // monotonic reference time point
