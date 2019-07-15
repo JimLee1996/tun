@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/JimLee1996/tun/kcp"
 	"github.com/JimLee1996/tun/smux"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -235,7 +234,7 @@ func main() {
 		smuxConfig.KeepAliveInterval = time.Duration(config.KeepAlive) * time.Second
 
 		createConn := func() (*smux.Session, error) {
-			kcpconn, err := kcp.Dial(config.RemoteAddr)
+			kcpconn, err := dial(&config)
 			if err != nil {
 				return nil, errors.Wrap(err, "createConn()")
 			}

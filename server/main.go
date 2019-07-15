@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/JimLee1996/tun/kcp"
 	"github.com/JimLee1996/tun/smux"
 	"github.com/urfave/cli"
 )
@@ -219,7 +218,7 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
-		lis, err := kcp.Listen(config.Listen)
+		lis, err := listen(&config)
 		checkError(err)
 		log.Println("listening on:", lis.Addr())
 		log.Println("target:", config.Target)
