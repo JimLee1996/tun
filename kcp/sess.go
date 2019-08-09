@@ -29,9 +29,9 @@ const (
 	acceptBacklog = 128
 )
 
-const (
-	errBrokenPipe       = "broken pipe"
-	errInvalidOperation = "invalid operation"
+var (
+	errBrokenPipe       = errors.New("broken pipe")
+	errInvalidOperation = errors.New("invalid operation")
 )
 
 var (
@@ -138,7 +138,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errors.New(errBrokenPipe)
+			return 0, errBrokenPipe
 		}
 
 		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
@@ -201,7 +201,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		s.mu.Lock()
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errors.New(errBrokenPipe)
+			return 0, errBrokenPipe
 		}
 
 		// controls how much data will be sent to kcp core
@@ -269,7 +269,7 @@ func (s *UDPSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isClosed {
-		return errors.New(errBrokenPipe)
+		return errBrokenPipe
 	}
 	close(s.die)
 	s.isClosed = true
@@ -385,7 +385,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 			return nil
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetReadBuffer sets the socket read buffer, no effect if it's accepted from Listener
@@ -397,7 +397,7 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 			return nc.SetReadBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetWriteBuffer sets the socket write buffer, no effect if it's accepted from Listener
@@ -409,7 +409,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 			return nc.SetWriteBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // post-processing for sending a packet from kcp core
@@ -600,7 +600,7 @@ func (l *Listener) SetReadBuffer(bytes int) error {
 	if nc, ok := l.conn.(setReadBuffer); ok {
 		return nc.SetReadBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetWriteBuffer sets the socket write buffer for the Listener
@@ -608,7 +608,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	if nc, ok := l.conn.(setWriteBuffer); ok {
 		return nc.SetWriteBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
@@ -619,7 +619,7 @@ func (l *Listener) SetDSCP(dscp int) error {
 		}
 		return nil
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
@@ -640,7 +640,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
-		return nil, errors.New(errBrokenPipe)
+		return nil, errBrokenPipe
 	}
 }
 
