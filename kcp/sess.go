@@ -87,6 +87,10 @@ type (
 	setWriteBuffer interface {
 		SetWriteBuffer(bytes int) error
 	}
+
+	setDSCP interface {
+		SetDSCP(int) error
+	}
 )
 
 // newUDPSession create a new udp session for client or server
@@ -373,15 +377,34 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
 }
 
-// SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
+// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
+//
+// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
+// this function instead.
+//
+// It has no effect if it's accepted from Listener.
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.l == nil {
-		if nc, ok := s.conn.(net.Conn); ok {
-			if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
-				return ipv6.NewConn(nc).SetTrafficClass(dscp)
-			}
+	if s.l != nil {
+		return errInvalidOperation
+	}
+
+	// interface enabled
+	if ts, ok := s.conn.(setDSCP); ok {
+		return ts.SetDSCP(dscp)
+	}
+
+	if nc, ok := s.conn.(net.Conn); ok {
+		var succeed bool
+		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
+			succeed = true
+		}
+		if err := ipv6.NewConn(nc).SetTrafficClass(dscp); err == nil {
+			succeed = true
+		}
+
+		if succeed {
 			return nil
 		}
 	}
@@ -611,13 +634,28 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
-// SetDSCP sets the 6bit DSCP field of IP header
+// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
+//
+// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
+// this function instead.
 func (l *Listener) SetDSCP(dscp int) error {
+	// interface enabled
+	if ts, ok := l.conn.(setDSCP); ok {
+		return ts.SetDSCP(dscp)
+	}
+
 	if nc, ok := l.conn.(net.Conn); ok {
-		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
-			return ipv6.NewConn(nc).SetTrafficClass(dscp)
+		var succeed bool
+		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
+			succeed = true
 		}
-		return nil
+		if err := ipv6.NewConn(nc).SetTrafficClass(dscp); err == nil {
+			succeed = true
+		}
+
+		if succeed {
+			return nil
+		}
 	}
 	return errInvalidOperation
 }
