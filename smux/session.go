@@ -14,10 +14,10 @@ const (
 	defaultAcceptBacklog = 1024
 )
 
-const (
-	errBrokenPipe      = "broken pipe"
-	errInvalidProtocol = "invalid protocol version"
-	errGoAway          = "stream id overflows, should start a new connection"
+var (
+	errBrokenPipe      = errors.New("broken pipe")
+	errInvalidProtocol = errors.New("invalid protocol version")
+	errGoAway          = errors.New("stream id overflows, should start a new connection")
 )
 
 type writeRequest struct {
@@ -82,14 +82,14 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 // OpenStream is used to create a new stream
 func (s *Session) OpenStream() (*Stream, error) {
 	if s.IsClosed() {
-		return nil, errors.New(errBrokenPipe)
+		return nil, errBrokenPipe
 	}
 
 	// generate stream id
 	s.nextStreamIDLock.Lock()
 	if s.goAway > 0 {
 		s.nextStreamIDLock.Unlock()
-		return nil, errors.New(errGoAway)
+		return nil, errGoAway
 	}
 
 	s.nextStreamID += 2
@@ -97,7 +97,7 @@ func (s *Session) OpenStream() (*Stream, error) {
 	if sid == sid%2 { // stream-id overflows
 		s.goAway = 1
 		s.nextStreamIDLock.Unlock()
-		return nil, errors.New(errGoAway)
+		return nil, errGoAway
 	}
 	s.nextStreamIDLock.Unlock()
 
@@ -128,7 +128,7 @@ func (s *Session) AcceptStream() (*Stream, error) {
 	case <-deadline:
 		return nil, errTimeout
 	case <-s.die:
-		return nil, errors.New(errBrokenPipe)
+		return nil, errBrokenPipe
 	}
 }
 
@@ -139,7 +139,7 @@ func (s *Session) Close() (err error) {
 	select {
 	case <-s.die:
 		s.dieLock.Unlock()
-		return errors.New(errBrokenPipe)
+		return errBrokenPipe
 	default:
 		close(s.die)
 		s.dieLock.Unlock()
@@ -216,7 +216,7 @@ func (s *Session) readFrame(buffer []byte) (f Frame, err error) {
 	}
 
 	if hdr.Version() != version {
-		return f, errors.New(errInvalidProtocol)
+		return f, errInvalidProtocol
 	}
 
 	f.ver = hdr.Version()
@@ -346,7 +346,7 @@ func (s *Session) writeFrameInternal(f Frame, deadline <-chan time.Time) (int, e
 	}
 	select {
 	case <-s.die:
-		return 0, errors.New(errBrokenPipe)
+		return 0, errBrokenPipe
 	case s.writes <- req:
 	case <-deadline:
 		return 0, errTimeout
@@ -358,6 +358,6 @@ func (s *Session) writeFrameInternal(f Frame, deadline <-chan time.Time) (int, e
 	case <-deadline:
 		return 0, errTimeout
 	case <-s.die:
-		return 0, errors.New(errBrokenPipe)
+		return 0, errBrokenPipe
 	}
 }
