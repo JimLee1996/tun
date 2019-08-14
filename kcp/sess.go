@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"golang.org/x/net/ipv4"
-	"golang.org/x/net/ipv6"
 )
 
 type errTimeout struct {
@@ -377,10 +375,7 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
 }
 
-// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
-//
-// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
-// this function instead.
+// SetDSCP will invoke the `func SetDSCP(int) error` that underlying connection has implemented.
 //
 // It has no effect if it's accepted from Listener.
 func (s *UDPSession) SetDSCP(dscp int) error {
@@ -390,23 +385,8 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 		return errInvalidOperation
 	}
 
-	// interface enabled
 	if ts, ok := s.conn.(setDSCP); ok {
 		return ts.SetDSCP(dscp)
-	}
-
-	if nc, ok := s.conn.(net.Conn); ok {
-		var succeed bool
-		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
-			succeed = true
-		}
-		if err := ipv6.NewConn(nc).SetTrafficClass(dscp); err == nil {
-			succeed = true
-		}
-
-		if succeed {
-			return nil
-		}
 	}
 	return errInvalidOperation
 }
@@ -634,28 +614,10 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
-// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
-//
-// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
-// this function instead.
+// SetDSCP will invoke `func SetDSCP(int) error` that underlying connection has implemented.
 func (l *Listener) SetDSCP(dscp int) error {
-	// interface enabled
 	if ts, ok := l.conn.(setDSCP); ok {
 		return ts.SetDSCP(dscp)
-	}
-
-	if nc, ok := l.conn.(net.Conn); ok {
-		var succeed bool
-		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
-			succeed = true
-		}
-		if err := ipv6.NewConn(nc).SetTrafficClass(dscp); err == nil {
-			succeed = true
-		}
-
-		if succeed {
-			return nil
-		}
 	}
 	return errInvalidOperation
 }
