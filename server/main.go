@@ -6,9 +6,12 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"time"
 
+	"github.com/JimLee1996/tun/kcp"
 	"github.com/JimLee1996/tun/smux"
+	"github.com/JimLee1996/tun/tcpraw"
 	"github.com/urfave/cli"
 )
 
@@ -168,6 +171,10 @@ func main() {
 			Name:  "quiet",
 			Usage: "to suppress the 'stream open/close' messages",
 		},
+		cli.BoolFlag{
+			Name:  "tcp",
+			Usage: "to emulate a TCP connection(linux)",
+		},
 		cli.StringFlag{
 			Name:  "c",
 			Value: "", // when the value is not empty, the config path must exists
@@ -192,6 +199,7 @@ func main() {
 		config.KeepAlive = c.Int("keepalive")
 		config.Log = c.String("log")
 		config.Quiet = c.Bool("quiet")
+		config.TCP = c.Bool("tcp")
 
 		if c.String("c") != "" {
 			//Now only support json config file
@@ -218,9 +226,7 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
-		lis, err := listen(&config)
-		checkError(err)
-		log.Println("listening on:", lis.Addr())
+		log.Println("listening on:", config.Listen)
 		log.Println("target:", config.Target)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
@@ -231,30 +237,54 @@ func main() {
 		log.Println("keepalive:", config.KeepAlive)
 		log.Println("quiet:", config.Quiet)
 
-		if err := lis.SetDSCP(config.DSCP); err != nil {
-			log.Println("SetDSCP:", err)
-		}
-		if err := lis.SetReadBuffer(config.SockBuf); err != nil {
-			log.Println("SetReadBuffer:", err)
-		}
-		if err := lis.SetWriteBuffer(config.SockBuf); err != nil {
-			log.Println("SetWriteBuffer:", err)
-		}
+		// main loop
+		var wg sync.WaitGroup
+		loop := func(lis *kcp.Listener) {
+			defer wg.Done()
+			if err := lis.SetDSCP(config.DSCP); err != nil {
+				log.Println("SetDSCP:", err)
+			}
+			if err := lis.SetReadBuffer(config.SockBuf); err != nil {
+				log.Println("SetReadBuffer:", err)
+			}
+			if err := lis.SetWriteBuffer(config.SockBuf); err != nil {
+				log.Println("SetWriteBuffer:", err)
+			}
 
-		for {
-			if conn, err := lis.AcceptKCP(); err == nil {
-				log.Println("remote address:", conn.RemoteAddr())
-				conn.SetStreamMode(true)
-				conn.SetWriteDelay(false)
-				conn.SetNoDelay(config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
-				conn.SetMtu(config.MTU)
-				conn.SetWindowSize(config.SndWnd, config.RcvWnd)
-				conn.SetACKNoDelay(config.AckNodelay)
-				go handleMux(conn, &config)
-			} else {
-				log.Printf("%+v", err)
+			for {
+				if conn, err := lis.AcceptKCP(); err == nil {
+					log.Println("remote address:", conn.RemoteAddr())
+					conn.SetStreamMode(true)
+					conn.SetWriteDelay(false)
+					conn.SetNoDelay(config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
+					conn.SetMtu(config.MTU)
+					conn.SetWindowSize(config.SndWnd, config.RcvWnd)
+					conn.SetACKNoDelay(config.AckNodelay)
+					go handleMux(conn, &config)
+				} else {
+					log.Printf("%+v", err)
+				}
 			}
 		}
+
+		if config.TCP { // tcp dual stack
+			if conn, err := tcpraw.Listen("tcp", config.Listen); err == nil {
+				lis, err := kcp.ServeConn(conn)
+				checkError(err)
+				wg.Add(1)
+				go loop(lis)
+			} else {
+				log.Println(err)
+			}
+		}
+
+		// udp stack
+		lis, err := kcp.Listen(config.Listen)
+		checkError(err)
+		wg.Add(1)
+		go loop(lis)
+		wg.Wait()
+		return nil
 	}
 	myApp.Run(os.Args)
 }

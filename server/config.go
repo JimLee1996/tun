@@ -23,6 +23,7 @@ type Config struct {
 	KeepAlive    int    `json:"keepalive"`
 	Log          string `json:"log"`
 	Quiet        bool   `json:"quiet"`
+	TCP          bool   `json:"tcp"`
 }
 
 func parseJSONConfig(config *Config, path string) error {
