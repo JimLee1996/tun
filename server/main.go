@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/JimLee1996/tun/kcp"
@@ -239,7 +240,10 @@ func main() {
 		log.Println("quiet:", config.Quiet)
 
 		// main loop
+		var wg sync.WaitGroup
 		loop := func(lis *kcp.Listener) {
+			defer wg.Done()
+
 			if err := lis.SetDSCP(config.DSCP); err != nil {
 				log.Println("SetDSCP:", err)
 			}
@@ -270,6 +274,7 @@ func main() {
 		if config.ListenUDP != "" {
 			lis, err := kcp.Listen(config.ListenUDP)
 			checkError(err)
+			wg.Add(1)
 			go loop(lis)
 		}
 
@@ -278,13 +283,16 @@ func main() {
 			if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
 				lis, err := kcp.ServeConn(conn)
 				checkError(err)
+				wg.Add(1)
 				go loop(lis)
 			} else {
 				log.Println(err)
 			}
 		}
 
+		wg.Wait()
 		return nil
 	}
+
 	myApp.Run(os.Args)
 }
