@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/JimLee1996/tun/kcp"
@@ -93,9 +92,14 @@ func main() {
 	myApp.Version = VERSION
 	myApp.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "listen,l",
+			Name:  "listen_udp,lu",
 			Value: ":18388",
-			Usage: "kcp server listen address",
+			Usage: "kcp server listen (UDP) address",
+		},
+		cli.StringFlag{
+			Name:  "listen_tcp, lt",
+			Value: ":1935",
+			Usage: "kcp server listen (TCP) address",
 		},
 		cli.StringFlag{
 			Name:  "target, t",
@@ -171,10 +175,6 @@ func main() {
 			Name:  "quiet",
 			Usage: "to suppress the 'stream open/close' messages",
 		},
-		cli.BoolFlag{
-			Name:  "tcp",
-			Usage: "to emulate a TCP connection(linux)",
-		},
 		cli.StringFlag{
 			Name:  "c",
 			Value: "", // when the value is not empty, the config path must exists
@@ -183,7 +183,8 @@ func main() {
 	}
 	myApp.Action = func(c *cli.Context) error {
 		config := Config{}
-		config.Listen = c.String("listen")
+		config.ListenUDP = c.String("listen_udp")
+		config.ListenTCP = c.String("listen_tcp")
 		config.Target = c.String("target")
 		config.Mode = c.String("mode")
 		config.MTU = c.Int("mtu")
@@ -199,7 +200,6 @@ func main() {
 		config.KeepAlive = c.Int("keepalive")
 		config.Log = c.String("log")
 		config.Quiet = c.Bool("quiet")
-		config.TCP = c.Bool("tcp")
 
 		if c.String("c") != "" {
 			//Now only support json config file
@@ -226,7 +226,8 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
-		log.Println("listening on:", config.Listen)
+		log.Println("listening (udp) on:", config.ListenUDP)
+		log.Println("listening (tcp) on:", config.ListenTCP)
 		log.Println("target:", config.Target)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
@@ -238,9 +239,7 @@ func main() {
 		log.Println("quiet:", config.Quiet)
 
 		// main loop
-		var wg sync.WaitGroup
 		loop := func(lis *kcp.Listener) {
-			defer wg.Done()
 			if err := lis.SetDSCP(config.DSCP); err != nil {
 				log.Println("SetDSCP:", err)
 			}
@@ -267,23 +266,24 @@ func main() {
 			}
 		}
 
-		if config.TCP { // tcp dual stack
-			if conn, err := tcpraw.Listen("tcp", config.Listen); err == nil {
+		// udp stack
+		if config.ListenUDP != "" {
+			lis, err := kcp.Listen(config.ListenUDP)
+			checkError(err)
+			go loop(lis)
+		}
+
+		// tcp stack
+		if config.ListenTCP != "" {
+			if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
 				lis, err := kcp.ServeConn(conn)
 				checkError(err)
-				wg.Add(1)
 				go loop(lis)
 			} else {
 				log.Println(err)
 			}
 		}
 
-		// udp stack
-		lis, err := kcp.Listen(config.Listen)
-		checkError(err)
-		wg.Add(1)
-		go loop(lis)
-		wg.Wait()
 		return nil
 	}
 	myApp.Run(os.Args)

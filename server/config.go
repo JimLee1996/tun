@@ -7,7 +7,8 @@ import (
 
 // Config for server
 type Config struct {
-	Listen       string `json:"listen"`
+	ListenUDP    string `json:"listen_udp"`
+	ListenTCP    string `json:"listen_tcp"`
 	Target       string `json:"target"`
 	Mode         string `json:"mode"`
 	MTU          int    `json:"mtu"`
@@ -23,7 +24,6 @@ type Config struct {
 	KeepAlive    int    `json:"keepalive"`
 	Log          string `json:"log"`
 	Quiet        bool   `json:"quiet"`
-	TCP          bool   `json:"tcp"`
 }
 
 func parseJSONConfig(config *Config, path string) error {
