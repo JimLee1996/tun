@@ -1,11 +1,11 @@
 {
     "target": "127.0.0.1:8388",
     "listen_udp": ":18388",
-    "listen_tcp": ":1935",
+    "listen_tcp": ":1755",
     "listens": {
         ":18388": "udp",
-        ":1935": "tcp",
-        ":12306": "tcp"
+        ":1755": "tcp",
+        ":554": "all"
     },
     "mode": "fast3",
     "sndwnd": 2048,
