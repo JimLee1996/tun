@@ -1,0 +1,10 @@
+{
+    "remoteaddr": "vps:18388",
+    "localaddr": ":8388",
+    "sndwnd": 2048,
+    "rcvwnd": 2048,
+    "mode": "fast3",
+    "sockbuf": 16777217,
+    "tcp": true,
+    "conn": 1
+}
