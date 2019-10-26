@@ -7,9 +7,12 @@ import (
 )
 
 func dial(config *Config) (*kcp.UDPSession, error) {
-	conn, err := tcpraw.Dial("tcp", config.RemoteAddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "tcpraw.Dial()")
+	if config.TCP {
+		conn, err := tcpraw.Dial("tcp", config.RemoteAddr)
+		if err != nil {
+			return nil, errors.Wrap(err, "tcpraw.Dial()")
+		}
+		return kcp.NewConn(config.RemoteAddr, conn)
 	}
-	return kcp.NewConn(config.RemoteAddr, conn)
+	return kcp.Dial(config.RemoteAddr)
 }

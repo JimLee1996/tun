@@ -157,6 +157,10 @@ func main() {
 			Name:  "quiet",
 			Usage: "to suppress the 'stream open/close' messages",
 		},
+		cli.BoolFlag{
+			Name:  "tcp",
+			Usage: "to emulate a TCP connection(linux)",
+		},
 		cli.StringFlag{
 			Name:  "c",
 			Value: "", // when the value is not empty, the config path must exists
@@ -184,6 +188,7 @@ func main() {
 		config.KeepAlive = c.Int("keepalive")
 		config.Log = c.String("log")
 		config.Quiet = c.Bool("quiet")
+		config.TCP = c.Bool("tcp")
 
 		if c.String("c") != "" {
 			err := parseJSONConfig(&config, c.String("c"))
@@ -210,6 +215,8 @@ func main() {
 		}
 
 		log.Println("version:", VERSION)
+		log.Println("tcpraw:", config.TCP)
+
 		addr, err := net.ResolveTCPAddr("tcp", config.LocalAddr)
 		checkError(err)
 		listener, err := net.ListenTCP("tcp", addr)
