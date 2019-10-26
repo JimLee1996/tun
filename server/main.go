@@ -227,8 +227,6 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
-		log.Println("listening (udp) on:", config.ListenUDP)
-		log.Println("listening (tcp) on:", config.ListenTCP)
 		log.Println("target:", config.Target)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
@@ -274,6 +272,7 @@ func main() {
 		if len(config.Listens) != 0 {
 			for addr, protocol := range config.Listens {
 				if protocol == "tcp" {
+					log.Println("listening (tcp) on:", addr)
 					if conn, err := tcpraw.Listen("tcp", addr); err == nil {
 						lis, err := kcp.ServeConn(conn)
 						checkError(err)
@@ -283,6 +282,7 @@ func main() {
 						log.Println(err)
 					}
 				} else if protocol == "udp" {
+					log.Println("listening (udp) on:", addr)
 					lis, err := kcp.Listen(addr)
 					checkError(err)
 					wg.Add(1)
@@ -296,6 +296,7 @@ func main() {
 
 			// udp stack
 			if config.ListenUDP != "" {
+				log.Println("listening (udp) on:", config.ListenUDP)
 				lis, err := kcp.Listen(config.ListenUDP)
 				checkError(err)
 				wg.Add(1)
@@ -305,6 +306,7 @@ func main() {
 			// tcp stack
 			if config.ListenTCP != "" {
 				if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
+					log.Println("listening (tcp) on:", config.ListenTCP)
 					lis, err := kcp.ServeConn(conn)
 					checkError(err)
 					wg.Add(1)
