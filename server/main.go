@@ -271,7 +271,7 @@ func main() {
 		// listen multiple ports
 		if len(config.Listens) != 0 {
 			for addr, protocol := range config.Listens {
-				if protocol == "tcp" {
+				if protocol == "tcp" || protocol == "all" {
 					log.Println("listening (tcp) on:", addr)
 					if conn, err := tcpraw.Listen("tcp", addr); err == nil {
 						lis, err := kcp.ServeConn(conn)
@@ -281,14 +281,13 @@ func main() {
 					} else {
 						log.Println(err)
 					}
-				} else if protocol == "udp" {
+				}
+				if protocol == "udp" || protocol == "all" {
 					log.Println("listening (udp) on:", addr)
 					lis, err := kcp.Listen(addr)
 					checkError(err)
 					wg.Add(1)
 					go loop(lis)
-				} else {
-					log.Printf("Protocol %s is not supported on %s", protocol, addr)
 				}
 			}
 
