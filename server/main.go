@@ -270,23 +270,48 @@ func main() {
 			}
 		}
 
-		// udp stack
-		if config.ListenUDP != "" {
-			lis, err := kcp.Listen(config.ListenUDP)
-			checkError(err)
-			wg.Add(1)
-			go loop(lis)
-		}
+		// listen multiple ports
+		if len(config.Listens) != 0 {
+			for addr, protocol := range config.Listens {
+				if protocol == "tcp" {
+					if conn, err := tcpraw.Listen("tcp", addr); err == nil {
+						lis, err := kcp.ServeConn(conn)
+						checkError(err)
+						wg.Add(1)
+						go loop(lis)
+					} else {
+						log.Println(err)
+					}
+				} else if protocol == "udp" {
+					lis, err := kcp.Listen(addr)
+					checkError(err)
+					wg.Add(1)
+					go loop(lis)
+				} else {
+					log.Printf("Protocol %s is not supported on %s", protocol, addr)
+				}
+			}
 
-		// tcp stack
-		if config.ListenTCP != "" {
-			if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
-				lis, err := kcp.ServeConn(conn)
+		} else {
+
+			// udp stack
+			if config.ListenUDP != "" {
+				lis, err := kcp.Listen(config.ListenUDP)
 				checkError(err)
 				wg.Add(1)
 				go loop(lis)
-			} else {
-				log.Println(err)
+			}
+
+			// tcp stack
+			if config.ListenTCP != "" {
+				if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
+					lis, err := kcp.ServeConn(conn)
+					checkError(err)
+					wg.Add(1)
+					go loop(lis)
+				} else {
+					log.Println(err)
+				}
 			}
 		}
 
