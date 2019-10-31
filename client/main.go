@@ -214,19 +214,6 @@ func main() {
 			checkError(err)
 		}
 
-		ssRemoteHost := os.Getenv("SS_REMOTE_HOST")
-		ssRemotePort := os.Getenv("SS_REMOTE_PORT")
-		ssLocalHost := os.Getenv("SS_LOCAL_HOST")
-		ssLocalPort := os.Getenv("SS_LOCAL_PORT")
-
-		if len(ssRemoteHost) != 0 && len(ssRemotePort) != 0 {
-			config.RemoteAddr = ssRemoteHost + ":" + ssRemotePort
-		}
-
-		if len(ssLocalHost) != 0 && len(ssLocalPort) != 0 {
-			config.LocalAddr = ssLocalHost + ":" + ssLocalPort
-		}
-
 		// log redirect
 		if config.Log != "" {
 			f, err := os.OpenFile(config.Log, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
