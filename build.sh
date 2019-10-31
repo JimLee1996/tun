@@ -16,17 +16,19 @@ fi
 cd tun
 rm -rf *
 
-# x86_64
-os=linux
-arch=amd64
-env CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_${os}_${arch}${suffix} github.com/JimLee1996/tun/server
-env CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_${os}_${arch}${suffix} github.com/JimLee1996/tun/client
-if $UPX; then upx -9 client_${os}_${arch}${suffix} server_${os}_${arch}${suffix};fi
+# Linux x86_64
+env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_amd64 github.com/JimLee1996/tun/server
+env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_amd64 github.com/JimLee1996/tun/client
 
-# MIPS32LE
+
+# MIPS32LE Client
 env CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_mipsle github.com/JimLee1996/tun/client
-if $UPX; then upx -9 client_linux_mips*;fi
 
-# ARM
-env CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_arm$v  github.com/JimLee1996/tun/client
-if $UPX; then upx -9 client_linux_arm*;fi
+# ARM Client
+env CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_arm  github.com/JimLee1996/tun/client
+
+# macOS Client
+env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_darwin  github.com/JimLee1996/tun/client
+
+if $UPX; then upx -9 *;fi
+cp ../*.json .
