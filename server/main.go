@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"io"
 	"log"
 	"math/rand"
@@ -13,10 +14,15 @@ import (
 	"github.com/JimLee1996/tun/smux"
 	"github.com/JimLee1996/tun/tcpraw"
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/pbkdf2"
 )
 
-// VERSION is injected by buildflags
-var VERSION = "SELFBUILD"
+var (
+	// VERSION is injected by buildflags
+	VERSION = "SELFBUILD"
+	// SALT is use for pbkdf2 key expansion
+	SALT = "kcp-go"
+)
 
 // handle multiplex-ed connection
 func handleMux(conn io.ReadWriteCloser, config *Config) {
@@ -108,6 +114,16 @@ func main() {
 			Usage: "target server address",
 		},
 		cli.StringFlag{
+			Name:  "key",
+			Value: "tuntuntun",
+			Usage: "pre-shared secret between client and server",
+		},
+		cli.StringFlag{
+			Name:  "crypt",
+			Value: "aes",
+			Usage: "aes, aes-128, aes-192, none",
+		},
+		cli.StringFlag{
 			Name:  "mode",
 			Value: "fast3",
 			Usage: "profiles: fast3, fast2, fast, normal, manual",
@@ -187,6 +203,8 @@ func main() {
 		config.ListenUDP = c.String("listen_udp")
 		config.ListenTCP = c.String("listen_tcp")
 		config.Target = c.String("target")
+		config.Key = c.String("key")
+		config.Crypt = c.String("crypt")
 		config.Mode = c.String("mode")
 		config.MTU = c.Int("mtu")
 		config.SndWnd = c.Int("sndwnd")
@@ -227,7 +245,27 @@ func main() {
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 10, 2, 1
 		}
 
+		log.Println("version:", VERSION)
+		log.Println("initiating key derivation")
+		pass := pbkdf2.Key([]byte(config.Key), []byte(SALT), 4096, 32, sha1.New)
+		log.Println("key derivation done")
+		var block kcp.BlockCrypt
+		switch config.Crypt {
+		case "xor":
+			block, _ = kcp.NewSimpleXORBlockCrypt(pass)
+		case "none":
+			block, _ = kcp.NewNoneBlockCrypt(pass)
+		case "aes-128":
+			block, _ = kcp.NewAESBlockCrypt(pass[:16])
+		case "aes-192":
+			block, _ = kcp.NewAESBlockCrypt(pass[:24])
+		default:
+			config.Crypt = "aes"
+			block, _ = kcp.NewAESBlockCrypt(pass)
+		}
+
 		log.Println("target:", config.Target)
+		log.Println("encryption:", config.Crypt)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
 		log.Println("mtu:", config.MTU)
@@ -268,51 +306,30 @@ func main() {
 			}
 		}
 
+		// unify port protocol
+		if len(config.Listens) == 0 {
+			config.Listens = map[string]string{config.ListenUDP: "udp", config.ListenTCP: "tcp"}
+		}
+
 		// listen multiple ports
-		if len(config.Listens) != 0 {
-			for addr, protocol := range config.Listens {
-				if protocol == "tcp" || protocol == "all" {
-					log.Println("listening (tcp) on:", addr)
-					if conn, err := tcpraw.Listen("tcp", addr); err == nil {
-						lis, err := kcp.ServeConn(conn)
-						checkError(err)
-						wg.Add(1)
-						go loop(lis)
-					} else {
-						log.Println(err)
-					}
-				}
-				if protocol == "udp" || protocol == "all" {
-					log.Println("listening (udp) on:", addr)
-					lis, err := kcp.Listen(addr)
-					checkError(err)
-					wg.Add(1)
-					go loop(lis)
-				}
-			}
-
-		} else {
-
-			// udp stack
-			if config.ListenUDP != "" {
-				log.Println("listening (udp) on:", config.ListenUDP)
-				lis, err := kcp.Listen(config.ListenUDP)
-				checkError(err)
-				wg.Add(1)
-				go loop(lis)
-			}
-
-			// tcp stack
-			if config.ListenTCP != "" {
-				if conn, err := tcpraw.Listen("tcp", config.ListenTCP); err == nil {
-					log.Println("listening (tcp) on:", config.ListenTCP)
-					lis, err := kcp.ServeConn(conn)
+		for addr, protocol := range config.Listens {
+			if protocol == "tcp" || protocol == "all" {
+				log.Println("listening (tcp) on:", addr)
+				if conn, err := tcpraw.Listen("tcp", addr); err == nil {
+					lis, err := kcp.ServeConn(block, conn)
 					checkError(err)
 					wg.Add(1)
 					go loop(lis)
 				} else {
 					log.Println(err)
 				}
+			}
+			if protocol == "udp" || protocol == "all" {
+				log.Println("listening (udp) on:", addr)
+				lis, err := kcp.ListenWithOptions(addr, block)
+				checkError(err)
+				wg.Add(1)
+				go loop(lis)
 			}
 		}
 

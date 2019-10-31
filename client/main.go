@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"io"
 	"log"
 	"math/rand"
@@ -8,13 +9,19 @@ import (
 	"os"
 	"time"
 
+	"github.com/JimLee1996/tun/kcp"
 	"github.com/JimLee1996/tun/smux"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/pbkdf2"
 )
 
-// VERSION is injected by buildflags
-var VERSION = "SELFBUILD"
+var (
+	// VERSION is injected by buildflags
+	VERSION = "SELFBUILD"
+	// SALT is use for pbkdf2 key expansion
+	SALT = "kcp-go"
+)
 
 func handleClient(sess *smux.Session, p1 io.ReadWriteCloser, quiet bool) {
 	if !quiet {
@@ -72,6 +79,16 @@ func main() {
 			Name:  "remoteaddr, r",
 			Value: "vps:18388",
 			Usage: "kcp server address",
+		},
+		cli.StringFlag{
+			Name:  "key",
+			Value: "tuntuntun",
+			Usage: "pre-shared secret between client and server",
+		},
+		cli.StringFlag{
+			Name:  "crypt",
+			Value: "aes",
+			Usage: "aes, aes-128, aes-192, none",
 		},
 		cli.StringFlag{
 			Name:  "mode",
@@ -171,6 +188,8 @@ func main() {
 		config := Config{}
 		config.LocalAddr = c.String("localaddr")
 		config.RemoteAddr = c.String("remoteaddr")
+		config.Key = c.String("key")
+		config.Crypt = c.String("crypt")
 		config.Mode = c.String("mode")
 		config.Conn = c.Int("conn")
 		config.AutoExpire = c.Int("autoexpire")
@@ -222,7 +241,26 @@ func main() {
 		listener, err := net.ListenTCP("tcp", addr)
 		checkError(err)
 
+		log.Println("initiating key derivation")
+		pass := pbkdf2.Key([]byte(config.Key), []byte(SALT), 4096, 32, sha1.New)
+		log.Println("key derivation done")
+		var block kcp.BlockCrypt
+		switch config.Crypt {
+		case "xor":
+			block, _ = kcp.NewSimpleXORBlockCrypt(pass)
+		case "none":
+			block, _ = kcp.NewNoneBlockCrypt(pass)
+		case "aes-128":
+			block, _ = kcp.NewAESBlockCrypt(pass[:16])
+		case "aes-192":
+			block, _ = kcp.NewAESBlockCrypt(pass[:24])
+		default:
+			config.Crypt = "aes"
+			block, _ = kcp.NewAESBlockCrypt(pass)
+		}
+
 		log.Println("listening on:", listener.Addr())
+		log.Println("encryption:", config.Crypt)
 		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 		log.Println("remote address:", config.RemoteAddr)
 		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
@@ -241,7 +279,7 @@ func main() {
 		smuxConfig.KeepAliveInterval = time.Duration(config.KeepAlive) * time.Second
 
 		createConn := func() (*smux.Session, error) {
-			kcpconn, err := dial(&config)
+			kcpconn, err := dial(&config, block)
 			if err != nil {
 				return nil, errors.Wrap(err, "createConn()")
 			}

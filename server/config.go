@@ -11,6 +11,8 @@ type Config struct {
 	ListenTCP    string            `json:"listen_tcp"`
 	Listens      map[string]string `json:"listens"`
 	Target       string            `json:"target"`
+	Key          string            `json:"key"`
+	Crypt        string            `json:"crypt"`
 	Mode         string            `json:"mode"`
 	MTU          int               `json:"mtu"`
 	SndWnd       int               `json:"sndwnd"`
