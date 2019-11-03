@@ -88,7 +88,7 @@ type (
 		chWriteError chan error    // notify PacketConn.Write() have an error
 
 		// nonce generator
-		nonce Entropy
+		nonce nonceMD5
 
 		isClosed bool // flag the session has Closed
 		mu       sync.Mutex
@@ -111,8 +111,6 @@ type (
 func newUDPSession(conv uint32, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
-	sess.nonce = new(nonceAES128)
-	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chReadError = make(chan error, 1)
