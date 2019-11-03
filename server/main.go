@@ -21,7 +21,7 @@ var (
 	// VERSION is injected by buildflags
 	VERSION = "SELFBUILD"
 	// SALT is use for pbkdf2 key expansion
-	SALT = "kcp-go"
+	SALT = "swag"
 )
 
 // handle multiplex-ed connection
@@ -120,12 +120,12 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "crypt",
-			Value: "aes",
-			Usage: "aes, aes-128, aes-192, none",
+			Value: "salsa20",
+			Usage: "salsa20, none",
 		},
 		cli.StringFlag{
 			Name:  "mode",
-			Value: "fast3",
+			Value: "fast",
 			Usage: "profiles: fast3, fast2, fast, normal, manual",
 		},
 		cli.IntFlag{
@@ -251,17 +251,10 @@ func main() {
 		log.Println("key derivation done")
 		var block kcp.BlockCrypt
 		switch config.Crypt {
-		case "xor":
-			block, _ = kcp.NewSimpleXORBlockCrypt(pass)
+		case "salsa20":
+			block, _ = kcp.NewSalsa20BlockCrypt(pass)
 		case "none":
 			block, _ = kcp.NewNoneBlockCrypt(pass)
-		case "aes-128":
-			block, _ = kcp.NewAESBlockCrypt(pass[:16])
-		case "aes-192":
-			block, _ = kcp.NewAESBlockCrypt(pass[:24])
-		default:
-			config.Crypt = "aes"
-			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
 		log.Println("target:", config.Target)
